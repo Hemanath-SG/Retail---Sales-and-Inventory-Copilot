@@ -66,33 +66,56 @@ Open your browser and navigate to:
 ├── requirements.txt         # Python dependencies
 ├── README.md                # Submission documentation
 ├── src/
-│   ├── analytics_engine.py  # Deterministic math engine (stockouts, dead stock, anomalies)
-│   ├── copilot.py           # Gemini GenAI grounding & prompt synthesis module
+│   ├── analytics_engine.py  # Deterministic math engine (stockouts, dead stock, anomalies, actions)
+│   ├── copilot.py           # Gemini GenAI grounding & prompt synthesis module (google.genai + legacy SDK)
+│   ├── vector_store.py      # Local vector retrieval pipeline (gemini-embedding-001 & NumPy cosine similarity)
 │   └── db.py                # Database connection helpers
 ├── static/
-│   ├── index.html           # Web UI layout
-│   ├── style.css            # Executive dark-mode styling system
-│   └── app.js               # Dynamic dashboard & chat logic
+│   ├── index.html           # Web UI layout & executive control tower
+│   ├── style.css            # Executive dark-mode styling system with animations & canvas styling
+│   └── app.js               # Dynamic dashboard, canvas chart renderer, 1-click action triggers & chat logic
+├── test_app.py              # Automated test suite (9 test suites covering all criteria)
 └── data/
-    └── retail_copilot.db    # SQLite dataset containing stores, products, inventory & 90-day sales
+    ├── retail_copilot.db    # SQLite dataset containing stores, products, inventory, 90-day sales & policies
+    └── catalog_embeddings.json # Precomputed normalized vector embeddings for instant offline boot (<90s)
 ```
 
 ---
 
-## 📊 Sample Data Generated
+## 🧪 Automated Testing
 
-The system includes precomputed, committed dataset files in `data/retail_copilot.db`:
+To run the full automated verification test suite:
+
+```bash
+python test_app.py
+```
+
+This validates:
+- KPI calculations and multi-store network totals.
+- Imminent stockout detection, velocity burn calculations, and inter-store surplus transfer logic.
+- 21-day dead stock detection and tied-up capital valuation.
+- Short-term vs baseline velocity anomalies (surge spikes and demand slumps).
+- Real-time manager action execution (transfers, reorders, markdowns) and audit trail logging.
+- Local vector store semantic retrieval with policy grounding.
+- GenAI query routing and strict refusal discipline on out-of-scope inquiries.
+
+---
+
+## 📊 Sample Data & Documents Generated
+
+The system includes precomputed, committed dataset files in `data/retail_copilot.db` and `data/catalog_embeddings.json`:
 - **3 Stores**: Downtown Metro Store (`STORE-001`), Suburban Mall Branch (`STORE-002`), Westside Express Mart (`STORE-003`).
 - **20 Product SKUs**: Across Fresh Produce & Dairy, Bakery, Beverages, Personal Care, and Home & Kitchen.
+- **5 Store Operational Policies**: Standard operating procedures for lead-time safety buffers, sister-store transfer priority, dead stock markdowns, and surge multipliers.
 - **90 Days of Sales History**: Over 5,400 daily sales transaction records.
 - **Seeded Hackathon Edge-Cases**:
-  - `MILK-ORG-1L` at Downtown (Stock = 14, Velocity = 11.5/day, Lead Time = 3d → Critical stockout in ~1.2 days).
-  - `COOKWARE-5P-SET` at Suburban Mall (Stock = 38, 0 sales in 21 days → $3,419.62 dead stock).
-  - `BEV-ENERGY-500ML` at Express Mart (3d velocity jumped 5.4x → Sales spike alert).
-  - `BAKERY-ART-BREAD` at Downtown (Sales dropped -88% after price hike → Sales drop alert).
+  - `MILK-ORG-1L` at Downtown (Stock = 14, Velocity = 11.8/day, Lead Time = 3d → Critical stockout in ~1.2 days; Suburban Mall has 85 units surplus ready for 24h transfer).
+  - `COOKWARE-5P-SET` at Suburban Mall (Stock = 38, 0 sales in 21 days → $1,710.00 dead stock tied up in cost capital).
+  - `BEV-ENERGY-500ML` at Express Mart (3d velocity jumped 2.9x → Sales spike alert).
+  - `BAKERY-ART-BREAD` at Downtown (Sales dropped -71% after price elasticity change → Sales drop alert).
 
 ---
 
 ## 📽️ Demo Video Link
 
-- **Demo Video**: [Link to 2-3 minute video walkthrough] *(To be attached upon submission)*
+- **Demo Video**: [Link to 2-3 minute video walkthrough] *(Attach YouTube/Loom demo recording here upon Devfolio submission)*
