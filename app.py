@@ -27,7 +27,7 @@ from src.analytics_engine import (
 )
 from src.copilot import ask_copilot
 
-PORT = 8000
+PORT = int(os.environ.get("PORT", 8000))
 
 class CopilotRequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
