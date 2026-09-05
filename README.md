@@ -116,6 +116,23 @@ The system includes precomputed, committed dataset files in `data/retail_copilot
 
 ---
 
+## 🌐 Live Deployment & Public Access
+
+- **Live Public URL**: 👉 **`https://lane-towns-router-crossword.trycloudflare.com`**
+- **Local Port**: `http://localhost:8000`
+
+### 1-Click Cloud Deployment:
+The repository includes production configuration files ready for any cloud provider:
+1. **Render**: Connect the repository to [Render](https://render.com). It will automatically detect `render.yaml` and deploy with `python app.py`.
+2. **Railway / Heroku**: Connect the repository to [Railway](https://railway.app). It will automatically build from `Procfile` and `requirements.txt`.
+3. **Docker**: Build and run anywhere using the included `Dockerfile`:
+   ```bash
+   docker build -t retail-copilot .
+   docker run -p 8000:8000 -e GEMINI_API_KEY="your_api_key" retail-copilot
+   ```
+
+---
+
 ## 📽️ Demo Video Link
 
 - **Demo Video**: [Link to 2-3 minute video walkthrough] *(Attach YouTube/Loom demo recording here upon Devfolio submission)*
