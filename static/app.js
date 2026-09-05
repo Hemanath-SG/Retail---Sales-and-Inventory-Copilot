@@ -2,6 +2,7 @@ let currentInventoryData = [];
 let isDrawerOpen = false;
 
 document.addEventListener("DOMContentLoaded", () => {
+    initApiKey();
     loadDashboardData();
     // Auto-refresh alerts every 60s
     setInterval(loadDashboardData, 60000);
@@ -341,6 +342,54 @@ function sendQuickPrompt(promptText) {
     handleChatSubmit(new Event("submit"));
 }
 
+function initApiKey() {
+    const key = localStorage.getItem("gemini_api_key");
+    const badge = document.getElementById("engineStatusText");
+    const label = document.getElementById("apiKeyLabel");
+    if (key && key.trim()) {
+        if (badge) badge.textContent = "Gemini 2.5 Flash (Live Key)";
+        if (label) label.textContent = "Gemini Key Set ✓";
+    } else {
+        if (badge) badge.textContent = "Gemini AI Grounded";
+        if (label) label.textContent = "Set Gemini Key";
+    }
+}
+
+function openApiKeyModal() {
+    const modal = document.getElementById("apiKeyModal");
+    const input = document.getElementById("apiKeyInput");
+    input.value = localStorage.getItem("gemini_api_key") || "";
+    modal.classList.add("open");
+}
+
+function closeApiKeyModal(event) {
+    if (!event || event.target.id === "apiKeyModal" || event.target.tagName === "BUTTON") {
+        document.getElementById("apiKeyModal").classList.remove("open");
+    }
+}
+
+function saveApiKey() {
+    const input = document.getElementById("apiKeyInput");
+    const val = input.value.trim();
+    if (val) {
+        localStorage.setItem("gemini_api_key", val);
+        showToast("✅ Gemini API Key saved locally!");
+    } else {
+        localStorage.removeItem("gemini_api_key");
+        showToast("ℹ️ API key cleared. Using local grounded engine.");
+    }
+    initApiKey();
+    closeApiKeyModal();
+}
+
+function clearApiKey() {
+    localStorage.removeItem("gemini_api_key");
+    document.getElementById("apiKeyInput").value = "";
+    initApiKey();
+    closeApiKeyModal();
+    showToast("ℹ️ Using offline deterministic grounding engine.");
+}
+
 async function handleChatSubmit(event) {
     event.preventDefault();
     const inputEl = document.getElementById("chatInput");
@@ -349,6 +398,7 @@ async function handleChatSubmit(event) {
 
     const chatHistory = document.getElementById("chatHistory");
     const storeId = document.getElementById("storeSelect").value;
+    const apiKey = localStorage.getItem("gemini_api_key") || "";
 
     // 1. User message bubble
     const userDiv = document.createElement("div");
@@ -367,7 +417,7 @@ async function handleChatSubmit(event) {
     botDiv.innerHTML = `
         <div class="avatar">🤖</div>
         <div class="message-content">
-            <span style="color: var(--text-muted);">Fetching store analytics & synthesizing with grounded engine...</span>
+            <span style="color: var(--text-muted);">Analyzing store operations & synthesizing response...</span>
         </div>
     `;
     chatHistory.appendChild(botDiv);
@@ -377,7 +427,7 @@ async function handleChatSubmit(event) {
         const res = await fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query: query, store_id: storeId })
+            body: JSON.stringify({ query: query, store_id: storeId, api_key: apiKey })
         });
         const data = await res.json();
 
@@ -385,7 +435,7 @@ async function handleChatSubmit(event) {
         botDiv.querySelector(".message-content").innerHTML = `
             ${formatted}
             <div class="engine-citation-footer">
-                <span>⚡ <strong>Grounded Engine:</strong> ${data.source}</span>
+                <span>⚡ <strong>Engine:</strong> ${data.source}</span>
                 <span>🏷️ Intent: <code>${data.intent}</code></span>
             </div>
         `;
@@ -408,12 +458,14 @@ function formatMarkdown(text) {
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/\*(.*?)\*/g, '<em>$1</em>')
         .replace(/`([^`]+)`/g, '<code style="background: var(--bg-input); padding: 2px 6px; border-radius: 4px; color: #93c5fd;">$1</code>')
+        .replace(/### (.*)/g, '<h4 style="color:#93c5fd; margin: 10px 0 4px; font-size: 0.9rem;">$1</h4>')
+        .replace(/## (.*)/g, '<h3 style="color:#60a5fa; margin: 12px 0 6px; font-size: 0.95rem;">$1</h3>')
         .replace(/\n- (.*)/g, '<li>$1</li>')
         .replace(/\n\n/g, '</p><p>')
         .replace(/\n/g, '<br>');
 
     if (html.includes('<li>')) {
-        html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+        html = html.replace(/(<li>.*<\/li>)/s, '<ul style="margin: 6px 0 10px 18px;">$1</ul>');
     }
     return `<p>${html}</p>`;
 }

@@ -30,9 +30,10 @@
                         <option value="STORE-003">Westside Express Mart (STORE-003)</option>
                     </select>
                 </div>
-                <div class="engine-badge">
-                    <span class="status-dot green"></span> Gemini AI Grounded
+                <div class="engine-badge" id="engineStatusBadge">
+                    <span class="status-dot green"></span> <span id="engineStatusText">Gemini AI Grounded</span>
                 </div>
+                <button class="btn-secondary" id="apiKeyBtn" onclick="openApiKeyModal()">🔑 <span id="apiKeyLabel">Set Gemini Key</span></button>
                 <button class="btn-secondary" onclick="toggleActionDrawer()">📜 Audit Log (<span id="auditCount">0</span>)</button>
             </div>
         </header>
@@ -122,14 +123,18 @@
                     <span class="badge-pill">Grounded GenAI</span>
                 </div>
                 
-                <!-- Quick Prompt Pills for Judges -->
+                <!-- Quick Prompt Pills for Judges & Managers -->
                 <div class="prompt-pills-label">Sample Manager Questions (Click to Test):</div>
                 <div class="prompt-pills">
+                    <button class="pill" onclick="sendQuickPrompt('What are the things in the inventory?')">📦 What is in inventory?</button>
                     <button class="pill" onclick="sendQuickPrompt('What is running out today?')">⚠️ What is running out?</button>
-                    <button class="pill" onclick="sendQuickPrompt('What is overstocked?')">📦 What is overstocked?</button>
-                    <button class="pill" onclick="sendQuickPrompt('Show sales spikes and drops')">📈 Sales spikes & drops</button>
-                    <button class="pill" onclick="sendQuickPrompt('How did Organic Milk do this month?')">🥛 How did Organic Milk do this month?</button>
-                    <button class="pill test-refusal" onclick="sendQuickPrompt('What laptops or electronics do you sell?')">❓ Edge Case: Refusal Test</button>
+                    <button class="pill" onclick="sendQuickPrompt('What is overstocked?')">📉 Dead stock alerts</button>
+                    <button class="pill" onclick="sendQuickPrompt('What are our best selling products?')">🏆 Best sellers</button>
+                    <button class="pill" onclick="sendQuickPrompt('Tell me about our stores and managers')">🏬 Store locations</button>
+                    <button class="pill" onclick="sendQuickPrompt('Show sales spikes and drops')">📈 Velocity spikes & drops</button>
+                    <button class="pill" onclick="sendQuickPrompt('How did Organic Milk do this month?')">🥛 Organic Milk 30d</button>
+                    <button class="pill" onclick="sendQuickPrompt('What are our store operational policies?')">📜 Store SOP Rules</button>
+                    <button class="pill test-refusal" onclick="sendQuickPrompt('What laptops or smartphones do you sell?')">❓ Refusal Test</button>
                 </div>
 
                 <!-- Chat History Container -->
@@ -214,6 +219,24 @@
             <p class="section-desc">Historical record of actions executed by store managers (transfers, reorders, markdowns).</p>
             <div class="audit-list" id="auditList">
                 <div class="loading-spinner">Loading audit history...</div>
+            </div>
+        </div>
+
+        <!-- Gemini API Key Configuration Modal -->
+        <div class="modal-overlay" id="apiKeyModal" onclick="closeApiKeyModal(event)">
+            <div class="modal-box" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <h3>🔑 Configure Google Gemini API Key</h3>
+                    <button class="close-drawer-btn" onclick="closeApiKeyModal()">✕</button>
+                </div>
+                <p class="section-desc" style="margin-top: 6px;">Enter your <code>GEMINI_API_KEY</code> to enable live Google Gemini 2.5 Flash reasoning. Stored securely in your browser session. If omitted, the system uses the deterministic mathematical grounding engine.</p>
+                <div class="modal-body" style="margin-top: 14px; display: flex; flex-direction: column; gap: 12px;">
+                    <input type="password" id="apiKeyInput" placeholder="AIzaSy..." style="background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px 14px; border-radius: 8px; font-family: var(--font-mono); font-size: 0.85rem; width: 100%;">
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn-secondary" style="background: var(--accent-blue); color: #fff; font-weight: 600;" onclick="saveApiKey()">Save & Activate Key</button>
+                        <button class="btn-secondary" onclick="clearApiKey()">Use Offline Local Engine</button>
+                    </div>
+                </div>
             </div>
         </div>
 

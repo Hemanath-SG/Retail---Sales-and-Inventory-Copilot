@@ -357,8 +357,8 @@ def get_sales_anomalies(store_id: Optional[str] = None) -> List[Dict[str, Any]]:
                     }
                 })
             
-            # Drop Detection (< 0.35x when baseline was significant)
-            elif ratio <= 0.35 and v_30d >= 4.0:
+            # Drop Detection (< 0.40x when baseline was significant)
+            elif ratio <= 0.40 and v_30d >= 2.5:
                 pct_dec = int((1.0 - ratio) * 100)
                 rec_action = (
                     f"📉 Demand slump detected (-{pct_dec}% vs 30d baseline). "
@@ -579,3 +579,87 @@ def query_database_facts(search_term: str) -> Dict[str, Any]:
         "products": products,
         "sales_facts_30d": sales_facts
     }
+
+def get_full_inventory_catalog(store_id: Optional[str] = None, category: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Returns all catalogue products with stock levels, prices, and categories"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    where_clauses = []
+    params = []
+    if store_id:
+        where_clauses.append("i.store_id = ?")
+        params.append(store_id)
+    if category:
+        where_clauses.append("LOWER(p.category) LIKE ?")
+        params.append(f"%{category.lower()}%")
+        
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    
+    cursor.execute(f"""
+    SELECT p.sku, p.name, p.category, p.unit_cost, p.unit_price, p.reorder_point, p.target_stock, p.lead_time_days,
+           i.store_id, s.name as store_name, i.current_stock
+    FROM products p
+    JOIN inventory i ON p.sku = i.sku
+    JOIN stores s ON i.store_id = s.store_id
+    {where_sql}
+    ORDER BY p.category, p.name, s.name
+    """, params)
+    
+    items = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return items
+
+def get_top_performing_products(store_id: Optional[str] = None, limit: int = 5) -> List[Dict[str, Any]]:
+    """Returns top selling products by 90-day revenue and units"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    where_sql = "WHERE d.store_id = ?" if store_id else ""
+    params = (store_id,) if store_id else ()
+    
+    cursor.execute(f"""
+    SELECT p.sku, p.name, p.category, p.unit_price, p.unit_cost,
+           SUM(d.units_sold) as total_units_sold,
+           ROUND(SUM(d.revenue), 2) as total_revenue,
+           ROUND(SUM(d.revenue) - SUM(d.units_sold * p.unit_cost), 2) as gross_margin
+    FROM daily_sales d
+    JOIN products p ON d.sku = p.sku
+    {where_sql}
+    GROUP BY p.sku
+    ORDER BY total_revenue DESC
+    LIMIT ?
+    """, (*params, limit))
+    
+    items = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return items
+
+def get_store_network_info() -> List[Dict[str, Any]]:
+    """Returns overview of all stores with manager details and inventory summary"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT s.store_id, s.name, s.location, s.manager, s.phone, s.delivery_days,
+           COUNT(DISTINCT i.sku) as sku_count,
+           SUM(i.current_stock) as total_units,
+           ROUND(SUM(i.current_stock * p.unit_cost), 2) as inventory_cost_val,
+           ROUND(SUM(i.current_stock * p.unit_price), 2) as inventory_retail_val
+    FROM stores s
+    LEFT JOIN inventory i ON s.store_id = i.store_id
+    LEFT JOIN products p ON i.sku = p.sku
+    GROUP BY s.store_id
+    ORDER BY s.store_id
+    """)
+    stores = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return stores
+
+def get_all_policies() -> List[Dict[str, Any]]:
+    """Returns all operational store policies"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT policy_id, category, title, description FROM store_policies ORDER BY policy_id")
+    policies = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return policies

@@ -74,7 +74,7 @@ Open your browser and navigate to:
 │   ├── index.html           # Web UI layout & executive control tower
 │   ├── style.css            # Executive dark-mode styling system with animations & canvas styling
 │   └── app.js               # Dynamic dashboard, canvas chart renderer, 1-click action triggers & chat logic
-├── test_app.py              # Automated test suite (9 test suites covering all criteria)
+├── test_app.py              # Automated test suite (10 test suites covering all criteria)
 └── data/
     ├── retail_copilot.db    # SQLite dataset containing stores, products, inventory, 90-day sales & policies
     └── catalog_embeddings.json # Precomputed normalized vector embeddings for instant offline boot (<90s)

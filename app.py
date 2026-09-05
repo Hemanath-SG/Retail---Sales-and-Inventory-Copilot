@@ -120,7 +120,8 @@ class CopilotRequestHandler(SimpleHTTPRequestHandler):
             if path == "/api/chat":
                 query = body.get("query", "")
                 store_id = body.get("store_id", None)
-                copilot_result = ask_copilot(query, store_id)
+                api_key = body.get("api_key", None)
+                copilot_result = ask_copilot(query, store_id, custom_api_key=api_key)
                 self.wfile.write(json.dumps(copilot_result).encode("utf-8"))
 
             elif path == "/api/actions/execute":

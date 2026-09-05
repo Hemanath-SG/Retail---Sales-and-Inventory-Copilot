@@ -22,6 +22,11 @@ from src.vector_store import search_catalog_knowledge
 
 class TestRetailCopilot(unittest.TestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        from generate_data import init_db
+        init_db()
+
     def test_01_overall_kpis(self):
         kpis = get_overall_kpis()
         self.assertIn("total_stores", kpis)
@@ -181,6 +186,30 @@ class TestRetailCopilot(unittest.TestCase):
         self.assertEqual(res4["intent"], "out_of_scope")
         self.assertIn("cannot answer", res4["answer"].lower())
         print("[OK] Copilot grounding, intent routing, and refusal tests passed.")
+
+    def test_10_expanded_copilot_intents(self):
+        # 1. Full Inventory Catalog Inquiry (The user's exact question!)
+        res1 = ask_copilot("what are the things in the inventory?")
+        self.assertEqual(res1["intent"], "inventory_catalog")
+        self.assertIn("Store Inventory Catalogue", res1["answer"])
+        self.assertIn("Fresh Produce & Dairy", res1["answer"])
+
+        # 2. Top Performing Best Sellers
+        res2 = ask_copilot("What are our best selling products?")
+        self.assertEqual(res2["intent"], "top_performers")
+        self.assertIn("Top 5 Best-Selling Products", res2["answer"])
+
+        # 3. Store Network & Managers
+        res3 = ask_copilot("Tell me about our stores and managers")
+        self.assertEqual(res3["intent"], "stores_overview")
+        self.assertIn("Downtown Metro Store", res3["answer"])
+        self.assertIn("Sarah Jenkins", res3["answer"])
+
+        # 4. Store Policies
+        res4 = ask_copilot("What are our store operational policies?")
+        self.assertEqual(res4["intent"], "policies_overview")
+        self.assertIn("Standard Operating Policies", res4["answer"])
+        print("[OK] Expanded Copilot intents (Inventory Catalogue, Best Sellers, Stores, Policies) passed.")
 
 if __name__ == "__main__":
     unittest.main()

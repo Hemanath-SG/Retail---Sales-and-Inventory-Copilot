@@ -300,9 +300,9 @@ def init_db():
                 elif store == "STORE-003" and sku == "BEV-ENERGY-500ML" and is_recent_3_days:
                     units = random.randint(32, 38)
                 
-                # 4. Sales Drop: Artisan Sourdough Bread at Downtown dropped to 1-2 units/day in last 5 days
-                elif store == "STORE-001" and sku == "BAKERY-ART-BREAD" and day_idx >= 86:
-                    units = random.randint(1, 3)
+                # 4. Sales Drop: Artisan Sourdough Bread at Downtown dropped to 0-2 units/day in last 7 days
+                elif store == "STORE-001" and sku == "BAKERY-ART-BREAD" and day_idx >= 84:
+                    units = random.randint(0, 2)
                 
                 else:
                     # Weekend demand uplift
