@@ -5,11 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Retail Sales and Inventory Copilot | TRACK_ID=PS03</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
     <div class="app-container">
-        <!-- Top Navbar -->
+        <!-- Top Executive Navbar -->
         <header class="navbar">
             <div class="brand">
                 <div class="logo-icon">🛒</div>
@@ -20,17 +22,18 @@
             </div>
             <div class="navbar-actions">
                 <div class="store-selector-wrapper">
-                    <label for="storeSelect">Store View:</label>
+                    <label for="storeSelect">Active Store View:</label>
                     <select id="storeSelect" onchange="loadDashboardData()">
-                        <option value="">All Stores Network</option>
-                        <option value="STORE-001">Downtown Metro Store</option>
-                        <option value="STORE-002">Suburban Mall Branch</option>
-                        <option value="STORE-003">Westside Express Mart</option>
+                        <option value="">All Stores (Network Level)</option>
+                        <option value="STORE-001">Downtown Metro Store (STORE-001)</option>
+                        <option value="STORE-002">Suburban Mall Branch (STORE-002)</option>
+                        <option value="STORE-003">Westside Express Mart (STORE-003)</option>
                     </select>
                 </div>
                 <div class="engine-badge">
                     <span class="status-dot green"></span> Gemini AI Grounded
                 </div>
+                <button class="btn-secondary" onclick="toggleActionDrawer()">📜 Audit Log (<span id="auditCount">0</span>)</button>
             </div>
         </header>
 
@@ -38,11 +41,11 @@
         <section class="kpi-grid">
             <div class="kpi-card">
                 <div class="kpi-header">
-                    <span class="kpi-title">90-Day Network Revenue</span>
+                    <span class="kpi-title">90-Day Total Revenue</span>
                     <span class="kpi-icon">💰</span>
                 </div>
-                <div class="kpi-value" id="kpiRevenue">$0</div>
-                <div class="kpi-sub" id="kpiUnits">0 units sold</div>
+                <div class="kpi-value" id="kpiRevenue">$0.00</div>
+                <div class="kpi-sub" id="kpiUnits">0 units sold (90d)</div>
             </div>
             <div class="kpi-card danger">
                 <div class="kpi-header">
@@ -50,14 +53,14 @@
                     <span class="kpi-icon">⚠️</span>
                 </div>
                 <div class="kpi-value" id="kpiStockouts">0</div>
-                <div class="kpi-sub">Items below lead-time buffer</div>
+                <div class="kpi-sub" id="kpiStockoutSub">Items below lead-time buffer</div>
             </div>
             <div class="kpi-card warning">
                 <div class="kpi-header">
-                    <span class="kpi-title">Dead Stock Value</span>
+                    <span class="kpi-title">Dead Stock Capital</span>
                     <span class="kpi-icon">📦</span>
                 </div>
-                <div class="kpi-value" id="kpiDeadStock">$0</div>
+                <div class="kpi-value" id="kpiDeadStock">$0.00</div>
                 <div class="kpi-sub" id="kpiDeadCount">0 idle items (21d zero sales)</div>
             </div>
             <div class="kpi-card info">
@@ -65,45 +68,84 @@
                     <span class="kpi-title">Total Inventory Capital</span>
                     <span class="kpi-icon">🏬</span>
                 </div>
-                <div class="kpi-value" id="kpiInventoryCost">$0</div>
+                <div class="kpi-value" id="kpiInventoryCost">$0.00</div>
                 <div class="kpi-sub" id="kpiSkus">0 SKUs across network</div>
             </div>
         </section>
 
-        <!-- Main Layout: Copilot Assistant + Attention Feed -->
+        <!-- Visual Analytics Row (Trends & Category Distribution) -->
+        <section class="visual-analytics-grid">
+            <div class="chart-card">
+                <div class="card-header">
+                    <div class="header-with-icon">
+                        <span class="section-icon">📈</span>
+                        <div>
+                            <h3>14-Day Network Sales Velocity Trend</h3>
+                            <p class="section-desc">Daily units sold & aggregate daily revenue</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="canvas-container">
+                    <canvas id="trendChart" width="700" height="200"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-card">
+                <div class="card-header">
+                    <div class="header-with-icon">
+                        <span class="section-icon">📊</span>
+                        <div>
+                            <h3>Category Performance Share</h3>
+                            <p class="section-desc">Revenue distribution across retail departments</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="category-bars-container" id="categoryBars">
+                    <div class="loading-spinner">Loading category breakdown...</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Main Operations Center: Copilot Assistant + Attention Feed -->
         <div class="main-content-grid">
             
             <!-- Left Column: Intelligent Copilot Assistant -->
             <section class="copilot-section">
                 <div class="card-header">
-                    <h2>🤖 Store Manager Copilot</h2>
-                    <span class="badge-pill">Plain Language QA</span>
+                    <div class="header-with-icon">
+                        <span class="section-icon">🤖</span>
+                        <div>
+                            <h2>Store Manager Copilot</h2>
+                            <p class="section-desc">Plain language QA backed by strict deterministic calculations & Google Gemini.</p>
+                        </div>
+                    </div>
+                    <span class="badge-pill">Grounded GenAI</span>
                 </div>
-                <p class="section-desc">Ask questions about inventory levels, sales velocity, overstocked items, or product performance.</p>
                 
                 <!-- Quick Prompt Pills for Judges -->
+                <div class="prompt-pills-label">Sample Manager Questions (Click to Test):</div>
                 <div class="prompt-pills">
                     <button class="pill" onclick="sendQuickPrompt('What is running out today?')">⚠️ What is running out?</button>
-                    <button class="pill" onclick="sendQuickPrompt('What stock is not moving?')">📦 What is overstocked?</button>
+                    <button class="pill" onclick="sendQuickPrompt('What is overstocked?')">📦 What is overstocked?</button>
                     <button class="pill" onclick="sendQuickPrompt('Show sales spikes and drops')">📈 Sales spikes & drops</button>
-                    <button class="pill" onclick="sendQuickPrompt('How did Organic Milk do this month?')">🥛 Organic Milk analysis</button>
-                    <button class="pill" onclick="sendQuickPrompt('What electronics are in stock?')">❓ Out-of-scope query test</button>
+                    <button class="pill" onclick="sendQuickPrompt('How did Organic Milk do this month?')">🥛 How did Organic Milk do this month?</button>
+                    <button class="pill test-refusal" onclick="sendQuickPrompt('What laptops or electronics do you sell?')">❓ Edge Case: Refusal Test</button>
                 </div>
 
-                <!-- Chat Messages History -->
+                <!-- Chat History Container -->
                 <div class="chat-container" id="chatHistory">
                     <div class="chat-message bot">
                         <div class="avatar">🤖</div>
                         <div class="message-content">
-                            Hello Store Manager! I am your Sales and Inventory Copilot. I inspect your store sales logs and stock levels daily.<br>
-                            Click one of the prompt buttons above or type your question below to inspect exact figures.
+                            <strong>Hello Store Manager!</strong> I am your Sales and Inventory Copilot. I continuously analyze daily sales velocity, inventory levels, lead times, and financial health across your stores.<br><br>
+                            Click one of the prompt buttons above or type your question below. I will always provide the actual numbers behind every answer and never guess when data is missing.
                         </div>
                     </div>
                 </div>
 
-                <!-- Chat Input Box -->
+                <!-- Chat Input Form -->
                 <form class="chat-input-area" onsubmit="handleChatSubmit(event)">
-                    <input type="text" id="chatInput" placeholder="Ask a question (e.g. 'Which store is running out of milk?')..." required autocomplete="off">
+                    <input type="text" id="chatInput" placeholder="Ask a question (e.g., 'What is running out?', 'How did Organic Milk do this month?')..." required autocomplete="off">
                     <button type="submit" id="sendBtn">Ask Copilot</button>
                 </form>
             </section>
@@ -111,27 +153,31 @@
             <!-- Right Column: Needs Attention Today Action Feed -->
             <section class="attention-section">
                 <div class="card-header">
-                    <h2>🔔 Needs Attention Today</h2>
+                    <div class="header-with-icon">
+                        <span class="section-icon">🔔</span>
+                        <div>
+                            <h2>Needs Attention Today</h2>
+                            <p class="section-desc">Proactive alerts with root cause data and executable actions.</p>
+                        </div>
+                    </div>
                     <span class="badge-pill red" id="alertCountBadge">0 Flags</span>
                 </div>
-                <p class="section-desc">Proactive alerts for stock-outs, dead stock, and sales velocity anomalies with recommended actions & assumptions.</p>
                 
                 <div class="attention-feed" id="attentionFeed">
-                    <!-- Dynamic Alert Cards will be rendered here -->
                     <div class="loading-spinner">Loading attention feed...</div>
                 </div>
             </section>
         </div>
 
-        <!-- Inventory Explorer Table -->
+        <!-- Store Network Inventory Matrix -->
         <section class="inventory-section">
             <div class="table-header-row">
                 <div>
-                    <h2>📊 Store Network Inventory Matrix</h2>
-                    <p class="subtitle">Live stock counts, sales velocity, reorder thresholds, and lead times.</p>
+                    <h2>🏬 Store Network Inventory Matrix</h2>
+                    <p class="subtitle">Real-time stock counts, 14-day velocity, reorder thresholds, and lead times.</p>
                 </div>
                 <div class="table-controls">
-                    <input type="text" id="tableSearch" placeholder="Search product name, SKU, category..." oninput="filterTable()">
+                    <input type="text" id="tableSearch" placeholder="Search product name, SKU, category, or store..." oninput="filterTable()">
                 </div>
             </div>
 
@@ -146,21 +192,38 @@
                             <th>Current Stock</th>
                             <th>Reorder Point</th>
                             <th>Lead Time</th>
+                            <th>Unit Cost</th>
                             <th>Unit Price</th>
-                            <th>Status</th>
+                            <th>Stock Status</th>
                         </tr>
                     </thead>
                     <tbody id="inventoryTableBody">
-                        <!-- Rendered via JavaScript -->
+                        <!-- Populated via JS -->
                     </tbody>
                 </table>
             </div>
         </section>
 
+        <!-- Manager Action Audit Log Drawer (Slide-out) -->
+        <div class="action-drawer-overlay" id="actionDrawerOverlay" onclick="toggleActionDrawer()"></div>
+        <div class="action-drawer" id="actionDrawer">
+            <div class="drawer-header">
+                <h3>📜 Manager Action Audit Log</h3>
+                <button class="close-drawer-btn" onclick="toggleActionDrawer()">✕</button>
+            </div>
+            <p class="section-desc">Historical record of actions executed by store managers (transfers, reorders, markdowns).</p>
+            <div class="audit-list" id="auditList">
+                <div class="loading-spinner">Loading audit history...</div>
+            </div>
+        </div>
+
+        <!-- Toast Notification Notification Popup -->
+        <div id="toastNotification" class="toast-notification"></div>
+
         <!-- Footer -->
         <footer class="footer">
             <p>NexusTiq24 Hackathon Submission | <strong>Retail - Sales and Inventory Copilot (TRACK_ID=PS03)</strong></p>
-            <p class="small">Strict Grounding Engine: Answers derived deterministically from local SQLite database and synthesized via Google Gemini API.</p>
+            <p class="small">Grounding Architecture: Deterministic SQLite Database + Local Vector Embedding Index + Google Gemini AI Reasoning.</p>
         </footer>
     </div>
 

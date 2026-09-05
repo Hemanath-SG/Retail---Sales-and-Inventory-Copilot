@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 # Ensure database exists before starting
 from generate_data import init_db, DB_PATH
 if not os.path.exists(DB_PATH):
-    print("Database not found. Generating sample retail dataset...")
+    print("Database not found. Initializing and generating sample retail dataset...")
     init_db()
 
 from src.analytics_engine import (
@@ -19,6 +19,10 @@ from src.analytics_engine import (
     get_dead_stock,
     get_sales_anomalies,
     get_daily_attention_feed,
+    get_category_breakdown,
+    get_sales_velocity_trends,
+    execute_manager_action,
+    get_action_history,
     get_db_connection
 )
 from src.copilot import ask_copilot
@@ -40,10 +44,19 @@ class CopilotRequestHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.end_headers()
 
             if path == "/api/dashboard":
-                response = get_overall_kpis(store_id)
+                kpis = get_overall_kpis(store_id)
+                categories = get_category_breakdown(store_id)
+                trends = get_sales_velocity_trends(store_id, days=14)
+                response = {
+                    "kpis": kpis,
+                    "categories": categories,
+                    "trends": trends
+                }
             elif path == "/api/alerts":
                 response = {
                     "attention_feed": get_daily_attention_feed(store_id),
@@ -75,6 +88,11 @@ class CopilotRequestHandler(SimpleHTTPRequestHandler):
                 stores = [dict(row) for row in cursor.fetchall()]
                 conn.close()
                 response = {"stores": stores}
+            elif path == "/api/trends":
+                days = int(query_params.get("days", [14])[0])
+                response = {"trends": get_sales_velocity_trends(store_id, days=days)}
+            elif path == "/api/actions/history":
+                response = {"actions": get_action_history()}
             else:
                 response = {"error": "API route not found"}
 
@@ -87,37 +105,56 @@ class CopilotRequestHandler(SimpleHTTPRequestHandler):
         parsed_url = urlparse(self.path)
         path = parsed_url.path
 
-        if path == "/api/chat":
+        if path.startswith("/api/"):
             content_length = int(self.headers.get("Content-Length", 0))
             post_data = self.rfile.read(content_length)
-            body = json.loads(post_data.decode("utf-8"))
-
-            query = body.get("query", "")
-            store_id = body.get("store_id", None)
-
-            copilot_result = ask_copilot(query, store_id)
+            body = json.loads(post_data.decode("utf-8")) if content_length > 0 else {}
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
             self.end_headers()
-            self.wfile.write(json.dumps(copilot_result).encode("utf-8"))
+
+            if path == "/api/chat":
+                query = body.get("query", "")
+                store_id = body.get("store_id", None)
+                copilot_result = ask_copilot(query, store_id)
+                self.wfile.write(json.dumps(copilot_result).encode("utf-8"))
+
+            elif path == "/api/actions/execute":
+                action_type = body.get("action_type", "")
+                payload = body.get("payload", {})
+                result = execute_manager_action(action_type, payload)
+                self.wfile.write(json.dumps(result).encode("utf-8"))
+
+            else:
+                self.wfile.write(json.dumps({"error": "POST route not found"}).encode("utf-8"))
         else:
             self.send_response(404)
             self.end_headers()
 
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
     def log_message(self, format, *args):
-        # Quiet log output for speed & clean output
+        # Quiet standard HTTP logs for clean judge terminal
         pass
 
 def run_server():
     server_address = ("", PORT)
     httpd = HTTPServer(server_address, CopilotRequestHandler)
-    print(f"==================================================")
+    print("=" * 60)
     print(f"  Retail - Sales and Inventory Copilot Running!")
     print(f"  TRACK_ID=PS03")
     print(f"  Serving on http://localhost:{PORT}")
-    print(f"==================================================")
+    print(f"  Gemini Grounding: Active (GEMINI_API_KEY / Local Engine)")
+    print("=" * 60)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
