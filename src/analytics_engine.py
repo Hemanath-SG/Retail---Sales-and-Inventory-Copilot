@@ -1,5 +1,7 @@
 import sqlite3
 import os
+import uuid
+from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "retail_copilot.db")
@@ -16,11 +18,11 @@ def get_overall_kpis(store_id: Optional[str] = None) -> Dict[str, Any]:
     where_clause = "WHERE store_id = ?" if store_id else ""
     params = (store_id,) if store_id else ()
     
-    # 1. Total Stores Count
+    # 1. Stores Count
     cursor.execute("SELECT COUNT(*) as count FROM stores " + (f"WHERE store_id = '{store_id}'" if store_id else ""))
     total_stores = cursor.fetchone()["count"]
     
-    # 2. Total Sales 30 Days & Revenue
+    # 2. Total Sales 90 Days & Revenue
     query_sales = f"""
     SELECT SUM(units_sold) as total_units, SUM(revenue) as total_revenue 
     FROM daily_sales 
@@ -46,7 +48,7 @@ def get_overall_kpis(store_id: Optional[str] = None) -> Dict[str, Any]:
     inventory_retail = round(inv_res["total_retail_value"] or 0.0, 2)
     total_skus = inv_res["total_skus"] or 0
     
-    # 4. Critical Stockout count
+    # 4. Critical Stockout, Dead Stock, and Anomaly Counts
     stockouts = get_stockout_risks(store_id)
     dead_stocks = get_dead_stock(store_id)
     anomalies = get_sales_anomalies(store_id)
@@ -84,8 +86,10 @@ def get_stockout_risks(store_id: Optional[str] = None) -> List[Dict[str, Any]]:
     inv_items = cursor.fetchall()
     
     risks = []
+    today = datetime.now()
+    
     for item in inv_items:
-        # Calculate 14-day sales velocity
+        # Calculate 14-day sales velocity: v = sum(units_sold)/14
         cursor.execute("""
         SELECT SUM(units_sold) as total_14d
         FROM daily_sales
@@ -100,28 +104,59 @@ def get_stockout_risks(store_id: Optional[str] = None) -> List[Dict[str, Any]]:
         else:
             days_remaining = 999.0
             
-        # Flag if stock runs out within lead time + 1 day buffer
-        if days_remaining <= item["lead_time_days"] + 1.0 or item["current_stock"] <= item["reorder_point"]:
-            rec_reorder = max(item["target_stock"] - item["current_stock"], 20)
+        # Flag condition: DIR <= Lead Time + 1.5 Days Safety Buffer OR (current_stock <= reorder_point and velocity > 0)
+        safety_threshold = item["lead_time_days"] + 1.5
+        is_critical = days_remaining <= item["lead_time_days"]
+        is_warning = days_remaining <= safety_threshold or (item["current_stock"] <= item["reorder_point"] and velocity_14d > 2.0)
+        
+        if is_critical or is_warning:
+            projected_stockout = (today + timedelta(days=max(0.1, days_remaining))).strftime("%Y-%m-%d")
+            rec_reorder = max(item["target_stock"] - item["current_stock"], 25)
             est_cost = round(rec_reorder * item["unit_cost"], 2)
             
-            # Check if another store has surplus inventory for transfer
+            # Check for Sister Store Surplus for inter-store transfer
             cursor.execute("""
             SELECT i2.store_id, s2.name as store_name, i2.current_stock
             FROM inventory i2
             JOIN stores s2 ON i2.store_id = s2.store_id
-            WHERE i2.sku = ? AND i2.store_id != ? AND i2.current_stock >= 50
+            WHERE i2.sku = ? AND i2.store_id != ? AND i2.current_stock >= 40
+            ORDER BY i2.current_stock DESC
             """, (item["sku"], item["store_id"]))
             surplus = cursor.fetchone()
             
             if surplus:
-                rec_action = f"Emergency transfer 25 units from {surplus['store_name']} (Surplus: {surplus['current_stock']} units available), or place purchase order for {rec_reorder} units (${est_cost})."
+                rec_action = (
+                    f"⚡ Transfer 25 units from {surplus['store_name']} (Surplus available: {surplus['current_stock']} units). "
+                    f"Inter-store transfer takes ~24h vs {item['lead_time_days']}-day vendor lead time."
+                )
+                action_payload = {
+                    "action_type": "TRANSFER",
+                    "sku": item["sku"],
+                    "product_name": item["product_name"],
+                    "to_store_id": item["store_id"],
+                    "to_store_name": item["store_name"],
+                    "from_store_id": surplus["store_id"],
+                    "from_store_name": surplus["store_name"],
+                    "quantity": 25
+                }
             else:
-                rec_action = f"Place purchase order for {rec_reorder} units (${est_cost} total) immediately to prevent stock-out before lead time."
+                rec_action = (
+                    f"📝 Issue Purchase Order for {rec_reorder} units (${est_cost} total) immediately "
+                    f"to prevent stockout before the {item['lead_time_days']}-day vendor lead time."
+                )
+                action_payload = {
+                    "action_type": "REORDER_PO",
+                    "sku": item["sku"],
+                    "product_name": item["product_name"],
+                    "store_id": item["store_id"],
+                    "store_name": item["store_name"],
+                    "quantity": rec_reorder,
+                    "estimated_cost": est_cost
+                }
                 
             risks.append({
                 "alert_type": "STOCKOUT_RISK",
-                "severity": "HIGH" if days_remaining <= item["lead_time_days"] else "MEDIUM",
+                "severity": "CRITICAL" if is_critical else "WARNING",
                 "store_id": item["store_id"],
                 "store_name": item["store_name"],
                 "sku": item["sku"],
@@ -130,16 +165,23 @@ def get_stockout_risks(store_id: Optional[str] = None) -> List[Dict[str, Any]]:
                 "current_stock": item["current_stock"],
                 "daily_velocity": velocity_14d,
                 "days_remaining": days_remaining,
+                "projected_stockout_date": projected_stockout,
                 "lead_time_days": item["lead_time_days"],
-                "message": f"{item['product_name']} has only {item['current_stock']} units left with daily sales of {velocity_14d} units/day. Estimated stock-out in {days_remaining} days (Lead time: {item['lead_time_days']} days).",
+                "message": (
+                    f"Likely stockout in {days_remaining} days! Current stock is {item['current_stock']} units with "
+                    f"daily burn of {velocity_14d} units/day. Lead time is {item['lead_time_days']} days."
+                ),
                 "recommended_action": rec_action,
+                "action_payload": action_payload,
                 "data_assumptions": {
                     "current_stock": item["current_stock"],
                     "daily_velocity_14d": velocity_14d,
                     "days_remaining": days_remaining,
                     "lead_time_days": item["lead_time_days"],
-                    "unit_cost": item["unit_cost"],
+                    "safety_buffer_days": 1.5,
+                    "projected_stockout_date": projected_stockout,
                     "reorder_qty": rec_reorder,
+                    "unit_cost": item["unit_cost"],
                     "total_est_cost": est_cost
                 }
             })
@@ -181,13 +223,26 @@ def get_dead_stock(store_id: Optional[str] = None) -> List[Dict[str, Any]]:
         if sales_21d == 0:
             tied_up = round(item["current_stock"] * item["unit_cost"], 2)
             potential_revenue = round(item["current_stock"] * item["unit_price"], 2)
-            
             markdown_price = round(item["unit_price"] * 0.75, 2)
-            rec_action = f"Apply 25% clearance markdown (New price: ${markdown_price}) or bundle with complementary fast-mover to liquidate ${tied_up} tied-up capital."
+            
+            rec_action = (
+                f"🏷️ Apply 25% clearance markdown (reduce from ${item['unit_price']} to ${markdown_price}) "
+                f"or cross-bundle with high-velocity category to liquidate ${tied_up} tied-up capital."
+            )
+            action_payload = {
+                "action_type": "APPLY_MARKDOWN",
+                "sku": item["sku"],
+                "product_name": item["product_name"],
+                "store_id": item["store_id"],
+                "store_name": item["store_name"],
+                "discount_pct": 25,
+                "old_price": item["unit_price"],
+                "new_price": markdown_price
+            }
             
             dead_stock_list.append({
                 "alert_type": "DEAD_STOCK",
-                "severity": "MEDIUM" if tied_up < 1000 else "HIGH",
+                "severity": "CRITICAL" if tied_up >= 1000 else "WARNING",
                 "store_id": item["store_id"],
                 "store_name": item["store_name"],
                 "sku": item["sku"],
@@ -196,14 +251,19 @@ def get_dead_stock(store_id: Optional[str] = None) -> List[Dict[str, Any]]:
                 "current_stock": item["current_stock"],
                 "sales_21d": sales_21d,
                 "tied_up_capital": tied_up,
-                "message": f"Zero sales recorded for {item['product_name']} over the last 21 days. {item['current_stock']} units sitting idle (${tied_up} tied up capital).",
+                "message": (
+                    f"Zero sales recorded for {item['product_name']} over the last 21 days! "
+                    f"{item['current_stock']} units sitting idle (${tied_up} tied-up capital)."
+                ),
                 "recommended_action": rec_action,
+                "action_payload": action_payload,
                 "data_assumptions": {
+                    "idle_days": 21,
+                    "units_sold_21d": 0,
                     "current_stock": item["current_stock"],
                     "unit_cost": item["unit_cost"],
-                    "current_unit_price": item["unit_price"],
+                    "unit_price": item["unit_price"],
                     "tied_up_capital": tied_up,
-                    "potential_revenue": potential_revenue,
                     "recommended_markdown_price": markdown_price
                 }
             })
@@ -257,10 +317,22 @@ def get_sales_anomalies(store_id: Optional[str] = None) -> List[Dict[str, Any]]:
             # Spike Detection (> 2.0x)
             if ratio >= 2.0 and sales_3d >= 10:
                 pct_inc = int((ratio - 1.0) * 100)
-                rec_action = f"Increase short-term reorder multiplier by 1.5x to account for demand surge (+{pct_inc}% sales jump)."
+                reorder_qty = int(item["target_stock"] * 1.5)
+                rec_action = (
+                    f"📈 Demand surge detected (+{pct_inc}% vs 30d baseline). "
+                    f"Apply 1.5x surge reorder multiplier to replenish {reorder_qty} units before stock is depleted."
+                )
+                action_payload = {
+                    "action_type": "REORDER_PO",
+                    "sku": item["sku"],
+                    "product_name": item["product_name"],
+                    "store_id": item["store_id"],
+                    "store_name": item["store_name"],
+                    "quantity": reorder_qty
+                }
                 anomalies.append({
                     "alert_type": "SALES_SPIKE",
-                    "severity": "HIGH" if ratio >= 3.0 else "MEDIUM",
+                    "severity": "CRITICAL" if ratio >= 3.0 else "WARNING",
                     "store_id": item["store_id"],
                     "store_name": item["store_name"],
                     "sku": item["sku"],
@@ -270,12 +342,17 @@ def get_sales_anomalies(store_id: Optional[str] = None) -> List[Dict[str, Any]]:
                     "v_3d": v_3d,
                     "v_30d": v_30d,
                     "multiplier": ratio,
-                    "message": f"Sales Spike! {item['product_name']} daily sales jumped by +{pct_inc}% over the last 3 days ({v_3d} units/day vs 30d avg of {v_30d} units/day).",
+                    "message": (
+                        f"Sales Spike! Daily sales surged by +{pct_inc}% over the last 3 days "
+                        f"({v_3d} units/day vs 30d baseline of {v_30d} units/day)."
+                    ),
                     "recommended_action": rec_action,
+                    "action_payload": action_payload,
                     "data_assumptions": {
                         "velocity_3d": v_3d,
-                        "velocity_30d_avg": v_30d,
+                        "velocity_30d_baseline": v_30d,
                         "spike_multiplier": ratio,
+                        "percentage_increase": pct_inc,
                         "current_stock": item["current_stock"]
                     }
                 })
@@ -283,10 +360,13 @@ def get_sales_anomalies(store_id: Optional[str] = None) -> List[Dict[str, Any]]:
             # Drop Detection (< 0.35x when baseline was significant)
             elif ratio <= 0.35 and v_30d >= 4.0:
                 pct_dec = int((1.0 - ratio) * 100)
-                rec_action = f"Investigate price changes, competitors, or shelf placement. Consider temporal promo or 2-for-1 deal to revive demand (-{pct_dec}% sales drop)."
+                rec_action = (
+                    f"📉 Demand slump detected (-{pct_dec}% vs 30d baseline). "
+                    f"Inspect shelf visibility, check competitor pricing, or run a 15% discount promo."
+                )
                 anomalies.append({
                     "alert_type": "SALES_DROP",
-                    "severity": "MEDIUM",
+                    "severity": "WARNING",
                     "store_id": item["store_id"],
                     "store_name": item["store_name"],
                     "sku": item["sku"],
@@ -296,11 +376,21 @@ def get_sales_anomalies(store_id: Optional[str] = None) -> List[Dict[str, Any]]:
                     "v_3d": v_3d,
                     "v_30d": v_30d,
                     "multiplier": ratio,
-                    "message": f"Sales Drop! {item['product_name']} sales dropped by -{pct_dec}% over the last 3 days ({v_3d} units/day vs 30d avg of {v_30d} units/day).",
+                    "message": (
+                        f"Sales Slump! Daily sales dropped by -{pct_dec}% over the last 3 days "
+                        f"({v_3d} units/day vs 30d baseline of {v_30d} units/day)."
+                    ),
                     "recommended_action": rec_action,
+                    "action_payload": {
+                        "action_type": "INSPECT_PROMOTION",
+                        "sku": item["sku"],
+                        "product_name": item["product_name"],
+                        "store_id": item["store_id"],
+                        "store_name": item["store_name"]
+                    },
                     "data_assumptions": {
                         "velocity_3d": v_3d,
-                        "velocity_30d_avg": v_30d,
+                        "velocity_30d_baseline": v_30d,
                         "drop_percentage": pct_dec,
                         "current_stock": item["current_stock"]
                     }
@@ -313,43 +403,176 @@ def get_daily_attention_feed(store_id: Optional[str] = None) -> List[Dict[str, A
     stockouts = get_stockout_risks(store_id)
     dead_stocks = get_dead_stock(store_id)
     anomalies = get_sales_anomalies(store_id)
-    
-    # Merge and prioritize
     all_alerts = stockouts + dead_stocks + anomalies
-    
-    # Sort order: HIGH severity first
-    return sorted(all_alerts, key=lambda x: 0 if x["severity"] == "HIGH" else 1)
+    return sorted(all_alerts, key=lambda x: 0 if x["severity"] == "CRITICAL" else 1)
 
-def query_database_facts(search_term: str) -> Dict[str, Any]:
-    """Helper to query database facts for GenAI grounding"""
+def get_category_breakdown(store_id: Optional[str] = None) -> List[Dict[str, Any]]:
     conn = get_db_connection()
     cursor = conn.cursor()
+    where = "WHERE s.store_id = ?" if store_id else ""
+    params = (store_id,) if store_id else ()
     
-    term = f"%{search_term.strip()}%"
+    query = f"""
+    SELECT p.category, 
+           SUM(s.units_sold) as total_units,
+           ROUND(SUM(s.revenue), 2) as total_revenue,
+           ROUND(SUM(s.units_sold * p.unit_cost), 2) as total_cost,
+           ROUND(SUM(s.revenue) - SUM(s.units_sold * p.unit_cost), 2) as gross_profit
+    FROM daily_sales s
+    JOIN products p ON s.sku = p.sku
+    {where}
+    GROUP BY p.category
+    ORDER BY total_revenue DESC
+    """
+    cursor.execute(query, params)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+def get_sales_velocity_trends(store_id: Optional[str] = None, days: int = 14) -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    where = f"WHERE sale_date >= date('now', '-{days} days')"
+    if store_id:
+        where += f" AND store_id = '{store_id}'"
+        
+    query = f"""
+    SELECT sale_date, SUM(units_sold) as units, ROUND(SUM(revenue), 2) as revenue
+    FROM daily_sales
+    {where}
+    GROUP BY sale_date
+    ORDER BY sale_date ASC
+    """
+    cursor.execute(query)
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+def execute_manager_action(action_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute a store manager action:
+    - TRANSFER: inter-store transfer
+    - REORDER_PO: purchase order restock
+    - APPLY_MARKDOWN: clearance price reduction
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    action_id = f"ACT-{uuid.uuid4().hex[:8].upper()}"
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Check if query matches product
-    cursor.execute("""
+    try:
+        if action_type == "TRANSFER":
+            from_store = payload["from_store_id"]
+            to_store = payload["to_store_id"]
+            sku = payload["sku"]
+            qty = int(payload.get("quantity", 25))
+            
+            # Decrement from source
+            cursor.execute("UPDATE inventory SET current_stock = MAX(0, current_stock - ?) WHERE store_id = ? AND sku = ?", (qty, from_store, sku))
+            # Increment destination
+            cursor.execute("UPDATE inventory SET current_stock = current_stock + ?, last_restocked = date('now') WHERE store_id = ? AND sku = ?", (qty, to_store, sku))
+            
+            details = f"Transferred {qty} units of {sku} from {from_store} to {to_store}."
+            cursor.execute("INSERT INTO manager_actions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           (action_id, now_str, action_type, sku, to_store, from_store, qty, details, "COMPLETED"))
+            conn.commit()
+            conn.close()
+            return {"success": True, "action_id": action_id, "message": details}
+            
+        elif action_type == "REORDER_PO":
+            store_id = payload["store_id"]
+            sku = payload["sku"]
+            qty = int(payload.get("quantity", 50))
+            
+            cursor.execute("UPDATE inventory SET current_stock = current_stock + ?, last_restocked = date('now') WHERE store_id = ? AND sku = ?", (qty, store_id, sku))
+            details = f"Placed purchase order and received replenishment of {qty} units for {sku} at {store_id}."
+            cursor.execute("INSERT INTO manager_actions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           (action_id, now_str, action_type, sku, store_id, None, qty, details, "COMPLETED"))
+            conn.commit()
+            conn.close()
+            return {"success": True, "action_id": action_id, "message": details}
+            
+        elif action_type == "APPLY_MARKDOWN":
+            store_id = payload.get("store_id", "ALL")
+            sku = payload["sku"]
+            new_price = float(payload["new_price"])
+            
+            cursor.execute("UPDATE products SET unit_price = ? WHERE sku = ?", (new_price, sku))
+            details = f"Applied clearance markdown for {sku} to new unit price ${new_price:.2f}."
+            cursor.execute("INSERT INTO manager_actions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           (action_id, now_str, action_type, sku, store_id, None, 0, details, "COMPLETED"))
+            conn.commit()
+            conn.close()
+            return {"success": True, "action_id": action_id, "message": details}
+            
+        else:
+            conn.close()
+            return {"success": False, "error": f"Unsupported action type: {action_type}"}
+            
+    except Exception as e:
+        conn.close()
+        return {"success": False, "error": str(e)}
+
+def get_action_history() -> List[Dict[str, Any]]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM manager_actions ORDER BY created_at DESC LIMIT 20")
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+def query_database_facts(search_term: str) -> Dict[str, Any]:
+    """Query exact facts for grounding plain language QA by matching catalogue products mentioned in search_term"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    term_lower = search_term.strip().lower()
+    
+    # Check all products to see if any product name or core keywords appear in the user's question
+    cursor.execute("SELECT sku, name FROM products")
+    all_prods = cursor.fetchall()
+    matched_skus = []
+    
+    for row in all_prods:
+        p_name_lower = row["name"].lower()
+        p_sku_lower = row["sku"].lower()
+        
+        # Exact product name or SKU in query
+        if p_name_lower in term_lower or p_sku_lower in term_lower:
+            matched_skus.append(row["sku"])
+            continue
+            
+        # Match significant keywords (e.g., 'milk', 'cheddar', 'yogurt', 'bread', 'croissant', 'cookware', 'shampoo')
+        keywords = [
+            w for w in p_name_lower.replace("-", " ").split() 
+            if len(w) >= 4 and w not in ["whole", "fresh", "large", "pack", "piece", "liquid", "tubes"]
+        ]
+        # If at least one distinct keyword is present in user question
+        if any(k in term_lower for k in keywords):
+            matched_skus.append(row["sku"])
+            
+    if not matched_skus:
+        conn.close()
+        return {"products": [], "sales_facts_30d": []}
+        
+    placeholders = ",".join("?" for _ in matched_skus)
+    cursor.execute(f"""
     SELECT p.sku, p.name, p.category, p.unit_cost, p.unit_price, p.reorder_point, p.lead_time_days,
            i.store_id, s.name as store_name, i.current_stock
     FROM products p
     JOIN inventory i ON p.sku = i.sku
     JOIN stores s ON i.store_id = s.store_id
-    WHERE p.name LIKE ? OR p.sku LIKE ? OR p.category LIKE ?
-    """, (term, term, term))
+    WHERE p.sku IN ({placeholders})
+    ORDER BY p.name, s.name
+    """, matched_skus)
     products = [dict(row) for row in cursor.fetchall()]
     
-    # Check 30d sales for matching products
-    sales_facts = []
-    if products:
-        skus = list(set(p["sku"] for p in products))
-        placeholders = ",".join("?" for _ in skus)
-        cursor.execute(f"""
-        SELECT store_id, sku, SUM(units_sold) as total_units_30d, SUM(revenue) as total_revenue_30d
-        FROM daily_sales
-        WHERE sku IN ({placeholders}) AND sale_date >= date('now', '-30 days')
-        GROUP BY store_id, sku
-        """, skus)
-        sales_facts = [dict(row) for row in cursor.fetchall()]
+    cursor.execute(f"""
+    SELECT store_id, sku, SUM(units_sold) as total_units_30d, ROUND(SUM(revenue), 2) as total_revenue_30d
+    FROM daily_sales
+    WHERE sku IN ({placeholders}) AND sale_date >= date('now', '-30 days')
+    GROUP BY store_id, sku
+    """, matched_skus)
+    sales_facts = [dict(row) for row in cursor.fetchall()]
         
     conn.close()
     return {
